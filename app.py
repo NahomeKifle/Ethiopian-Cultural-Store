@@ -1,10 +1,13 @@
-from flask import Flask
-from products import product_blueprint
+from app import create_app
+from dotenv import load_dotenv
+import os
 
-app = Flask(__name__)
+# Load environment variables
+load_dotenv()
 
-# Register the product blueprint
-app.register_blueprint(product_blueprint, url_prefix='/api')
+app = create_app()
 
 if __name__ == "__main__":
-    app.run(port=5001)
+    # Get port from environment variable or default to 5000
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

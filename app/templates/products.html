@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Products - Shopping Cart</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        .product-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .cart-icon {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+        }
+        .logout-btn {
+            position: fixed;
+            top: 20px;
+            right: 140px;
+            background: #dc3545;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+        }
+        .add-to-cart {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .add-to-cart:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .quantity-input {
+            width: 60px;
+            padding: 5px;
+            margin: 10px 0;
+            text-align: center;
+        }
+        .cart-modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-backdrop {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+        }
+        .close-modal {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        .cart-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .cart-total {
+            margin-top: 20px;
+            text-align: right;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+    <a href="#" class="cart-icon" onclick="viewCart()">🛒 Cart (<span id="cartCount">0</span>)</a>
+
+    <div class="container">
+        <h1>Available Products</h1>
+        <div id="errorMessage" class="alert alert-danger" style="display: none;"></div>
+        
+        <div class="product-grid" id="productList">
+            <!-- Products will be loaded here -->
+        </div>
+    </div>
+
+    <!-- Cart Modal -->
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="cart-modal" id="cartModal">
+        <button class="close-modal" onclick="closeCart()">×</button>
+        <h2>Your Cart</h2>
+        <div id="cartItems"></div>
+        <div class="cart-total">
+            Total: $<span id="cartTotal">0.00</span>
+        </div>
+    </div>
+
+    <script>
+        // Load products when page loads
+        document.addEventListener('DOMContentLoaded', loadProducts);
+        
+        async function loadProducts() {
+            try {
+                const response = await fetch('/api/products');
+                const data = await response.json();
+                
+                const productList = document.getElementById('productList');
+                productList.innerHTML = data.products.map(product => `
+                    <div class="product-card">
+                        <h3>${product.name}</h3>
+                        <p>$${product.price.toFixed(2)}</p>
+                        <p>Available: ${product.quantity}</p>
+                        <input 
+                            type="number" 
+                            min="1" 
+                            max="${product.quantity}" 
+                            value="1" 
+                            class="quantity-input"
+                            id="quantity-${product.id}"
+                            ${product.quantity <= 0 ? 'disabled' : ''}
+                        >
+                        <button 
+                            class="add-to-cart" 
+                            onclick="addToCart(${product.id})"
+                            ${product.quantity <= 0 ? 'disabled' : ''}
+                        >
+                            ${product.quantity <= 0 ? 'Out of Stock' : 'Add to Cart'}
+                        </button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                showError('Failed to load products');
+            }
+        }
+
+        async function addToCart(productId) {
+            try {
+                const quantityInput = document.getElementById(`quantity-${productId}`);
+                const quantity = parseInt(quantityInput.value);
+
+                if (quantity < 1) {
+                    showError('Please select a valid quantity');
+                    return;
+                }
+
+                const response = await fetch(`/api/cart/add/${productId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ quantity: quantity })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updateCartCount();
+                    loadProducts(); // Refresh product list to update quantities
+                    showError('Added to cart successfully!');
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('Failed to add item to cart');
+            }
+        }
+
+        async function updateCartCount() {
+            try {
+                const response = await fetch('/api/cart/my-cart');
+                const data = await response.json();
+                const totalItems = data.cart.reduce((sum, item) => sum + item.quantity, 0);
+                document.getElementById('cartCount').textContent = totalItems;
+            } catch (error) {
+                console.error('Failed to update cart count');
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                window.location.href = '/api/auth/login';
+            } catch (error) {
+                showError('Failed to logout');
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        async function viewCart() {
+            try {
+                const response = await fetch('/api/cart/my-cart');
+                const data = await response.json();
+                
+                const cartItemsDiv = document.getElementById('cartItems');
+                if (data.cart.length === 0) {
+                    cartItemsDiv.innerHTML = '<p>Your cart is empty</p>';
+                } else {
+                    cartItemsDiv.innerHTML = data.cart.map(item => `
+                        <div class="cart-item">
+                            <div>
+                                <h4>${item.name}</h4>
+                                <p>$${item.price.toFixed(2)} × ${item.quantity}</p>
+                            </div>
+                            <div>
+                                <p>$${item.item_total.toFixed(2)}</p>
+                                <button onclick="removeFromCart(${item.product_id}, 1)">Remove</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+                
+                document.getElementById('cartTotal').textContent = data.total.toFixed(2);
+                document.getElementById('modalBackdrop').style.display = 'block';
+                document.getElementById('cartModal').style.display = 'block';
+            } catch (error) {
+                showError('Failed to load cart');
+            }
+        }
+
+        async function removeFromCart(productId, quantity) {
+            try {
+                const response = await fetch(`/api/cart/remove/${productId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ quantity: quantity })
+                });
+
+                if (response.ok) {
+                    updateCartCount();
+                    loadProducts();
+                    viewCart(); // Refresh cart view
+                } else {
+                    const data = await response.json();
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('Failed to remove item from cart');
+            }
+        }
+
+        function closeCart() {
+            document.getElementById('modalBackdrop').style.display = 'none';
+            document.getElementById('cartModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('modalBackdrop').onclick = closeCart;
+
+        // Update cart count when page loads
+        updateCartCount();
+    </script>
+</body>
+</html> 
